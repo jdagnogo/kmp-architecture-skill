@@ -71,6 +71,53 @@ Everything here is the *shape* of the architecture — no business logic, no sec
 
 This skill assumes **CMP**: shared UI is the substance, "KMP" is the umbrella term.
 
+## What the Delegate buys you: a reusable UI feature
+
+**A Delegate is not a UseCase.** A UseCase is a stateless business operation
+(in → `Result` out, no UI). A **Delegate is stateful and UI-bound**: it owns a slice
+of **UI state** (`StateFlow<UiState>` + side effects) and the behavior behind it, and
+it's rendered by a paired Composable. So reusing a Delegate reuses the *whole
+feature* — the same UI **and** the same behavior — across screens, with one Kotlin
+keyword: `by`. The Delegate *calls* UseCases; it isn't one.
+
+```mermaid
+flowchart TB
+    subgraph UNIT["♻️ &nbsp;ONE reusable feature — built once"]
+        direction LR
+        D["⚙️ &nbsp;CommentsDelegate<br/><i>owns CommentsUiState · onEvent</i>"]
+        C["🎨 &nbsp;CommentsSection( )<br/><i>renders that UiState</i>"]
+        D <-. "state / events" .-> C
+    end
+
+    subgraph SCREENS["🧩 &nbsp;dropped into any feature — : CommentsDelegate by comments"]
+        direction LR
+        F1["PostDetail"]
+        F2["PhotoViewer"]
+        F3["AlbumItem"]
+    end
+
+    UNIT --> F1
+    UNIT --> F2
+    UNIT --> F3
+
+    classDef biz  fill:#D1FAE5,stroke:#059669,stroke-width:2px,color:#053D2B;
+    classDef ui   fill:#EDE9FE,stroke:#7C3AED,stroke-width:2px,color:#2E1065;
+    classDef glue fill:#DBEAFE,stroke:#2563EB,stroke-width:2px,color:#0C2A66;
+    class D biz;
+    class C ui;
+    class F1,F2,F3 glue;
+    style UNIT fill:#F0FDF4,stroke:#86EFAC,color:#065F46;
+    style SCREENS fill:#F8FAFC,stroke:#CBD5E1,color:#334155;
+```
+
+The comment thread is built **once**: `CommentsDelegate` owns `CommentsUiState` (the
+list, the input box, the optimistic-send and paging state), `CommentsSection()`
+renders it, and any screen gets the full feature by composing the delegate
+(`by comments`) and dropping in the Composable. Post detail, the photo viewer, the
+album item all show the *same* comment UI and behavior, written once. A UseCase
+can't do that — it has no state and no UI. Inside, the delegate calls
+`PostCommentUseCase` / `GetCommentsUseCase` for the actual operations.
+
 ## What's inside
 
 ```
@@ -89,6 +136,7 @@ examples/
   DataSourceTemplate.kt           Live listener + one-shot read
 assets/
   data-flow.mmd                   Mermaid source for the data-flow diagram
+  delegate-reuse.mmd              Mermaid source for the delegate-reuse diagram
 ```
 
 ## Use it as an Agent Skill

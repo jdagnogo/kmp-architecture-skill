@@ -51,6 +51,69 @@ class BarViewModel(
 > delegate is lifecycle wiring, not business logic. The screen's actual logic still
 > lives in the delegates.
 
+### Delegate vs UseCase — not the same thing
+
+This is the most common pushback, so be precise:
+
+| | UseCase | Delegate |
+|---|---------|----------|
+| Holds state? | No — stateless | Yes — owns `StateFlow<UiState>` + side effects |
+| Knows about UI? | No | Yes — paired with a Composable that renders its state |
+| Shape | `operator fun invoke(input): Result<T>` | `state` / `sideEffects` / `onEvent` / `init(scope)` |
+| Reused unit | a computation | a whole **UI feature** (state + behavior + its Composable) |
+| Relationship | the Delegate **calls** UseCases | — |
+
+Litmus test: *does a Composable render its state?* → it's a Delegate. *Is it a pure
+operation that returns a value?* → it's a UseCase. A Delegate that calls
+`PostCommentUseCase` is not a fancy UseCase; it's the stateful, UI-bound layer that
+**uses** one.
+
+### What the Delegate buys you: a reusable UI feature
+
+Because the Delegate owns a `UiState` that a shared Composable renders, reusing the
+delegate reuses the **whole feature** — identical UI *and* behavior — across screens.
+A UseCase reuses a computation; a Delegate reuses a feature.
+
+```mermaid
+flowchart TB
+    subgraph UNIT["♻️ &nbsp;ONE reusable feature — built once"]
+        direction LR
+        D["⚙️ &nbsp;CommentsDelegate<br/><i>owns CommentsUiState · onEvent</i>"]
+        C["🎨 &nbsp;CommentsSection( )<br/><i>renders that UiState</i>"]
+        D <-. "state / events" .-> C
+    end
+
+    subgraph SCREENS["🧩 &nbsp;dropped into any feature — : CommentsDelegate by comments"]
+        direction LR
+        F1["PostDetail"]
+        F2["PhotoViewer"]
+        F3["AlbumItem"]
+    end
+
+    UNIT --> F1
+    UNIT --> F2
+    UNIT --> F3
+
+    classDef biz  fill:#D1FAE5,stroke:#059669,stroke-width:2px,color:#053D2B;
+    classDef ui   fill:#EDE9FE,stroke:#7C3AED,stroke-width:2px,color:#2E1065;
+    classDef glue fill:#DBEAFE,stroke:#2563EB,stroke-width:2px,color:#0C2A66;
+    class D biz;
+    class C ui;
+    class F1,F2,F3 glue;
+    style UNIT fill:#F0FDF4,stroke:#86EFAC,color:#065F46;
+    style SCREENS fill:#F8FAFC,stroke:#CBD5E1,color:#334155;
+```
+
+The comment thread is built **once**: `CommentsDelegate` owns `CommentsUiState` (the
+list, the input box, the optimistic-send and paging state), `CommentsSection()`
+renders it, and any screen gets the full feature by composing the delegate
+(`by comments`) and dropping in the Composable. Post detail, the photo viewer, and
+the album item all show the *same* comment UI and behavior.
+
+Stack a few delegates into one ViewModel and the ViewModel collapses to a handful
+of lines of glue — each concern owned by a delegate that's testable and reusable on
+its own.
+
 ## Delegate — business logic + state
 
 A delegate orchestrates the **UI state** for a slice of a screen and turns UI
