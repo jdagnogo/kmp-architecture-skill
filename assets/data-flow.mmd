@@ -1,0 +1,8 @@
+flowchart LR
+    UI[Compose UI<br/>Page / Screen] --> VM[ViewModel<br/>by-delegation glue]
+    VM -->|init...Delegate scope| D[Delegate<br/>StateFlow + SideEffect]
+    D --> R[Repository<br/>domain contract]
+    R --> DS[DataSource<br/>live + one-shot reads]
+    DS --> BFF[BFF / Server<br/>writes, validation, secrets]
+    D -.StateFlow.-> UI
+    D -.SideEffect.-> UI
