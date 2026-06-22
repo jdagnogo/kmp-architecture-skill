@@ -53,7 +53,7 @@ interface FooDelegate {
 // --- data/ (or ui/viewmodel/) : the implementation --------------------------
 
 class FooDelegateImpl(
-    private val repository: FooRepository,          // deps injected via Koin
+    private val getFoo: GetFooUseCase,              // business ops injected via Koin
 ) : FooDelegate {
 
     private val _state = MutableStateFlow<FooState>(FooState.Loading)
@@ -86,14 +86,15 @@ class FooDelegateImpl(
     private fun load() {
         scope.launch {
             _state.value = FooState.Loading
-            runCatching { repository.getFoo(barId) }
+            // The delegate orchestrates UI state; the UseCase does the work.
+            getFoo(barId)
                 .onSuccess { _state.value = FooState.Content(it) }
                 .onFailure { _state.value = FooState.Error(it.message.orEmpty()) }
         }
     }
 }
 
-// Referenced by the template; see RepositoryTemplate.kt for the real shape.
-interface FooRepository {
-    suspend fun getFoo(barId: String): List<String>
+// Referenced by the template; see UseCaseTemplate.kt for the real shape.
+interface GetFooUseCase {
+    suspend operator fun invoke(barId: String): Result<List<String>>
 }

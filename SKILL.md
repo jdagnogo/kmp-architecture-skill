@@ -36,20 +36,26 @@ Use this skill when you are:
 ## The core idea
 
 ```
-ViewModel  →  Delegate  →  Repository  →  DataSource  →  BFF / Server
-  (glue)    (business     (domain        (live reads +   (all writes,
-            logic +        contract +     one-shot         validation,
-            state)         caching)       reads)           secrets)
+ViewModel → Delegate → UseCase → Repository → DataSource → BFF / Server
+  (glue)    (state +   (one        (domain     (live +      (all writes,
+            side       business     contract    one-shot     validation,
+            effects)   operation)   + cache)    reads)       secrets)
 ```
 
 Each layer has one job and never reaches past its neighbor:
 
 - **ViewModel** — pure glue. Owns no state of its own. Composes one or more
   **Delegates** with Kotlin `by` delegation and wires their lifecycle to
-  `viewModelScope`. Never calls a Repository directly.
-- **Delegate** — encapsulates the business logic for a slice of a screen. Owns a
-  `StateFlow<State>` and a `Flow<SideEffect>`. Receives its `CoroutineScope` via
-  `initFooDelegate(scope)` — it never creates its own scope.
+  `viewModelScope`. Never calls a UseCase or Repository directly.
+- **Delegate** — owns the screen-slice's `StateFlow<State>` and `Flow<SideEffect>`,
+  and translates UI intent (`onEvent`) into calls on **UseCases**. It orchestrates
+  *UI* state; it does not contain the business rules themselves. Receives its
+  `CoroutineScope` via `initFooDelegate(scope)` — never creates its own.
+- **UseCase** — one business operation, named after what it does (`SaveFooUseCase`,
+  `GetFeedUseCase`). Stateless, reusable across delegates, composes one or more
+  repositories. This is where business logic lives — so it's unit-testable in
+  isolation and not duplicated across screens. (Trivial pass-through reads may skip
+  it and let the delegate call the repository directly — see below.)
 - **Repository** — the domain contract (interface in `domain/`, impl in `data/`).
   Exposes a private `MutableStateFlow` as an immutable `StateFlow`. Reads directly,
   routes **all mutations through the BFF**, wraps them in `Result`.
@@ -59,15 +65,52 @@ Each layer has one job and never reaches past its neighbor:
 - **BFF / Server** — every write, every validation, every security-sensitive
   calculation. The client is "dumb": it renders state and forwards intent.
 
+> **Why a UseCase layer?** A common critique of the Delegate pattern is that the
+> delegate becomes a junk drawer of business logic. The UseCase layer answers that:
+> the delegate handles *state and effects*, the UseCase handles *what the operation
+> actually does*. A UseCase reused by three delegates is written and tested once.
+> **Pragmatic exception:** for a pure pass-through (a delegate that just reads a
+> `StateFlow` off a repository), a dedicated UseCase is ceremony — let the delegate
+> use the repository directly. Add the UseCase when there's a real operation:
+> orchestration, validation, combining sources, mapping.
+
 ```mermaid
-flowchart LR
-    UI[Compose UI<br/>Page / Screen] --> VM[ViewModel<br/>by-delegation glue]
-    VM -->|init...Delegate scope| D[Delegate<br/>StateFlow + SideEffect]
-    D --> R[Repository<br/>domain contract]
-    R --> DS[DataSource<br/>live + one-shot reads]
-    DS --> BFF[BFF / Server<br/>writes, validation, secrets]
-    D -.StateFlow.-> UI
-    D -.SideEffect.-> UI
+flowchart TB
+    subgraph CLIENT["📱 &nbsp;CLIENT · commonMain — shared Compose UI"]
+        direction TB
+        UI["🎨 &nbsp;Compose UI<br/><i>Page / Screen</i>"]
+        VM["🧩 &nbsp;ViewModel<br/><i>glue · by-delegation</i>"]
+        D["⚙️ &nbsp;Delegate<br/><i>StateFlow + SideEffect</i>"]
+        UC["🎯 &nbsp;UseCase<br/><i>one business operation</i>"]
+        R["📦 &nbsp;Repository<br/><i>domain contract + cache</i>"]
+        DS["📡 &nbsp;DataSource<br/><i>live + one-shot reads</i>"]
+    end
+    subgraph SERVER["☁️ &nbsp;SERVER"]
+        BFF["🔒 &nbsp;BFF<br/><i>writes · validation · secrets</i>"]
+    end
+
+    UI  -- "onEvent" --> VM
+    VM  -- "init(scope)" --> D
+    D   --> UC
+    UC  --> R
+    R   --> DS
+    DS  --> BFF
+    D  -. "StateFlow / SideEffect" .-> UI
+
+    classDef ui   fill:#EDE9FE,stroke:#7C3AED,stroke-width:2px,color:#2E1065;
+    classDef glue fill:#DBEAFE,stroke:#2563EB,stroke-width:2px,color:#0C2A66;
+    classDef biz  fill:#D1FAE5,stroke:#059669,stroke-width:2px,color:#053D2B;
+    classDef data fill:#FEF3C7,stroke:#D97706,stroke-width:2px,color:#5A3206;
+    classDef srv  fill:#FFE4E6,stroke:#E11D48,stroke-width:2px,color:#5C0A1E;
+
+    class UI ui;
+    class VM,D glue;
+    class UC,R biz;
+    class DS data;
+    class BFF srv;
+
+    style CLIENT fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#334155;
+    style SERVER fill:#FFF1F2,stroke:#FDA4AF,stroke-width:1px,color:#9F1239;
 ```
 
 ## The rules that matter
@@ -93,8 +136,9 @@ flowchart LR
 
 See `references/` for the deep dives and `examples/` for copy-paste skeletons:
 
-- `references/mvvm-delegate-bff.md` — the full ViewModel → Delegate → Repository →
-  DataSource → BFF flow, with the scope-ownership and state-exposure invariants.
+- `references/mvvm-delegate-bff.md` — the full ViewModel → Delegate → UseCase →
+  Repository → DataSource → BFF flow, with the scope-ownership and state-exposure
+  invariants and where business logic belongs.
 - `references/module-structure.md` — `commonMain` / `androidMain` / `iosMain`
   layout, per-feature `domain` / `data` / `ui` layering, `expect/actual`.
 - `references/koin-di.md` — module split, `singleOf(::Impl).bind(...)`, when to use
@@ -104,8 +148,9 @@ See `references/` for the deep dives and `examples/` for copy-paste skeletons:
 - `references/data-flow-rules.md` — the hard-won rules about live listeners,
   one-shot reads, and why every write goes through the BFF.
 
-- `examples/DelegateTemplate.kt` — interface + impl skeleton.
+- `examples/DelegateTemplate.kt` — interface + impl skeleton (calls a UseCase).
 - `examples/ViewModelTemplate.kt` — single- and multi-delegate composition.
+- `examples/UseCaseTemplate.kt` — one business operation, interface + impl.
 - `examples/RepositoryTemplate.kt` — domain interface + data impl.
 - `examples/DataSourceTemplate.kt` — live listener + one-shot read.
 

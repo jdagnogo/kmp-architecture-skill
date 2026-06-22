@@ -4,7 +4,7 @@ The data flows top to bottom; state flows back up. Each layer talks only to its
 direct neighbor.
 
 ```
-ViewModel  →  Delegate  →  Repository  →  DataSource  →  BFF / Server
+ViewModel  →  Delegate  →  UseCase  →  Repository  →  DataSource  →  BFF / Server
 ```
 
 ## ViewModel — glue only
@@ -53,7 +53,9 @@ class BarViewModel(
 
 ## Delegate — business logic + state
 
-A delegate is a self-contained unit of logic for a slice of a screen. It defines:
+A delegate orchestrates the **UI state** for a slice of a screen and turns UI
+intent into calls on **UseCases** — it does not hold the business rules itself. It
+defines:
 
 - `val state: StateFlow<FooState>` — the continuous UI state.
 - `val sideEffects: Flow<FooSideEffect>` — one-time events (navigation, toasts).
@@ -105,6 +107,51 @@ class FooDelegateImpl(
 **Invariant:** the `CoroutineScope` is `lateinit` and borrowed from the ViewModel.
 A delegate never builds its own scope — that would outlive the screen and leak.
 
+## UseCase — one business operation
+
+The common critique of the Delegate pattern is that the delegate turns into a junk
+drawer of business logic. The **UseCase** layer answers it: the delegate owns *UI
+state and effects*, the UseCase owns *what the operation actually does*.
+
+A UseCase is **one operation**, named for it (`SaveFooUseCase`, `GetFeedUseCase`),
+**stateless**, and **reusable** across delegates. It composes one or more
+repositories, applies the business rules, and returns a `Result`. Convention: a
+single `operator fun invoke(...)` so call sites read like a function.
+
+```kotlin
+interface SaveFooUseCase {
+    suspend operator fun invoke(input: FooInput): Result<Foo>
+}
+
+class SaveFooUseCaseImpl(
+    private val fooRepository: FooRepository,
+    private val barRepository: BarRepository,
+) : SaveFooUseCase {
+    override suspend fun invoke(input: FooInput): Result<Foo> {
+        if (input.label.isBlank())
+            return Result.failure(IllegalArgumentException("label required"))
+        val barId = barRepository.getBarId()
+            ?: return Result.failure(IllegalStateException("no bar"))
+        return fooRepository.saveFoo(input.copy(barId = barId))
+    }
+}
+```
+
+The delegate then depends on the UseCase, not the repository:
+
+```kotlin
+class FooDelegateImpl(
+    private val saveFoo: SaveFooUseCase,
+) : FooDelegate { /* onEvent -> scope.launch { saveFoo(input) ... } */ }
+```
+
+**Pragmatic exception — don't add ceremony.** If a delegate only needs to expose a
+repository's `StateFlow` (a pure pass-through read), a dedicated UseCase adds
+nothing — let the delegate use the repository directly. Reach for a UseCase when
+there's a *real* operation: orchestration across repositories, validation, combining
+sources, or mapping domain models to UI. The layer earns its place by being reused
+and unit-tested; it shouldn't exist just to forward a call.
+
 ## Repository — domain contract + caching
 
 The interface lives in `domain/` and knows nothing about the backend SDK. The impl
@@ -149,7 +196,10 @@ through the BFF.
 ## The invariants, in one place
 
 - ViewModel composes delegates with `by`; owns the only real scope.
-- Delegate owns `StateFlow<State>` + `Flow<SideEffect>`; borrows the scope via `init`.
+- Delegate owns `StateFlow<State>` + `Flow<SideEffect>`; borrows the scope via `init`;
+  calls UseCases, not repositories (except trivial pass-through reads).
+- UseCase is one stateless, reusable business operation (`operator fun invoke`);
+  business rules live here, not in the delegate.
 - State is always private `MutableStateFlow` → public `StateFlow` (`.asStateFlow()`);
   one-time events are `Channel` → `Flow` (`.receiveAsFlow()`).
 - Mutations return `Result<T>` and run through the BFF; the backend SDK never

@@ -1,8 +1,36 @@
-flowchart LR
-    UI[Compose UI<br/>Page / Screen] --> VM[ViewModel<br/>by-delegation glue]
-    VM -->|init...Delegate scope| D[Delegate<br/>StateFlow + SideEffect]
-    D --> R[Repository<br/>domain contract]
-    R --> DS[DataSource<br/>live + one-shot reads]
-    DS --> BFF[BFF / Server<br/>writes, validation, secrets]
-    D -.StateFlow.-> UI
-    D -.SideEffect.-> UI
+flowchart TB
+    subgraph CLIENT["📱 &nbsp;CLIENT · commonMain — shared Compose UI"]
+        direction TB
+        UI["🎨 &nbsp;Compose UI<br/><i>Page / Screen</i>"]
+        VM["🧩 &nbsp;ViewModel<br/><i>glue · by-delegation</i>"]
+        D["⚙️ &nbsp;Delegate<br/><i>StateFlow + SideEffect</i>"]
+        UC["🎯 &nbsp;UseCase<br/><i>one business operation</i>"]
+        R["📦 &nbsp;Repository<br/><i>domain contract + cache</i>"]
+        DS["📡 &nbsp;DataSource<br/><i>live + one-shot reads</i>"]
+    end
+    subgraph SERVER["☁️ &nbsp;SERVER"]
+        BFF["🔒 &nbsp;BFF<br/><i>writes · validation · secrets</i>"]
+    end
+
+    UI  -- "onEvent" --> VM
+    VM  -- "init(scope)" --> D
+    D   --> UC
+    UC  --> R
+    R   --> DS
+    DS  --> BFF
+    D  -. "StateFlow / SideEffect" .-> UI
+
+    classDef ui   fill:#EDE9FE,stroke:#7C3AED,stroke-width:2px,color:#2E1065;
+    classDef glue fill:#DBEAFE,stroke:#2563EB,stroke-width:2px,color:#0C2A66;
+    classDef biz  fill:#D1FAE5,stroke:#059669,stroke-width:2px,color:#053D2B;
+    classDef data fill:#FEF3C7,stroke:#D97706,stroke-width:2px,color:#5A3206;
+    classDef srv  fill:#FFE4E6,stroke:#E11D48,stroke-width:2px,color:#5C0A1E;
+
+    class UI ui;
+    class VM,D glue;
+    class UC,R biz;
+    class DS data;
+    class BFF srv;
+
+    style CLIENT fill:#F8FAFC,stroke:#CBD5E1,stroke-width:1px,color:#334155;
+    style SERVER fill:#FFF1F2,stroke:#FDA4AF,stroke-width:1px,color:#9F1239;
